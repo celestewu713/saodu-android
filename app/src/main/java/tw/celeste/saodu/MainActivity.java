@@ -406,50 +406,145 @@ public class MainActivity extends Activity {
         return scroll;
     }
 
-    private static final String[] TAB_NAMES = {"🛡️\n掃毒", "🎨\n外觀", "⚙️\n設定"};
-    private final View[] tabPages = new View[3];
-    private final TextView[] tabButtons = new TextView[3];
+    // 功能選單（左上角 ☰）：每次只顯示一個功能的畫面
+    private static final String[] MENU_NAMES = {"🛡️  掃毒", "🎨  外觀設定"};
+    private static final String[] PAGE_TITLES = {"掃毒", "外觀設定"};
+    private final View[] tabPages = new View[2];
+    private final TextView[] menuItems = new TextView[2];
     private int currentTab = 0;
+    private TextView pageTitle;
+    private View drawerDim;
+    private LinearLayout drawer;
 
     private void showTab(int i) {
         currentTab = i;
-        for (int k = 0; k < 3; k++) {
+        for (int k = 0; k < tabPages.length; k++) {
             tabPages[k].setVisibility(k == i ? View.VISIBLE : View.GONE);
-            tabButtons[k].setTextColor(k == i ? LINK : MUTED);
-            tabButtons[k].setTypeface(k == i ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT);
+            menuItems[k].setTextColor(k == i ? LINK : TEXT);
+            menuItems[k].setTypeface(k == i ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT);
+            GradientDrawable g = new GradientDrawable();
+            g.setCornerRadius(dp(10));
+            g.setColor(k == i ? ((0x22 << 24) | (LINK & 0x00FFFFFF)) : Color.TRANSPARENT);
+            menuItems[k].setBackground(g);
         }
+        pageTitle.setText(PAGE_TITLES[i]);
     }
 
-    /** 登入後的畫面：上面是內容，下面是「掃毒／外觀／設定」選單。 */
+    private boolean drawerOpen() {
+        return drawer != null && drawer.getVisibility() == View.VISIBLE;
+    }
+
+    private void openDrawer() {
+        drawerDim.setVisibility(View.VISIBLE);
+        drawer.setVisibility(View.VISIBLE);
+        drawerDim.setAlpha(0f);
+        drawerDim.animate().alpha(1f).setDuration(200).start();
+        drawer.setTranslationX(-dp(290));
+        drawer.animate().translationX(0).setDuration(200).start();
+    }
+
+    private void closeDrawer() {
+        if (!drawerOpen()) return;
+        drawerDim.animate().alpha(0f).setDuration(180).withEndAction(() -> drawerDim.setVisibility(View.GONE)).start();
+        drawer.animate().translationX(-dp(290)).setDuration(180)
+                .withEndAction(() -> drawer.setVisibility(View.GONE)).start();
+    }
+
+    private TextView menuItem(String label) {
+        TextView t = text(label, 17, TEXT, false);
+        t.setGravity(Gravity.CENTER_VERTICAL);
+        t.setPadding(dp(16), 0, dp(16), 0);
+        return t;
+    }
+
+    private void confirmLogout() {
+        if (scanning()) {
+            toastDialog("掃描進行中，請先停止掃描再登出。");
+            return;
+        }
+        new AlertDialog.Builder(this)
+                .setMessage("確定要登出嗎？")
+                .setPositiveButton("登出", (d, w) -> {
+                    showTab(0);
+                    showPage(false);
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    /** 登入後的畫面：上方是 ☰ 和標題，點 ☰ 從左邊滑出功能選單。 */
     private View buildLayout() {
+        FrameLayout outer = new FrameLayout(this);
         LinearLayout shell = new LinearLayout(this);
         shell.setOrientation(LinearLayout.VERTICAL);
-        FrameLayout content = new FrameLayout(this);
-        shell.addView(content, new LinearLayout.LayoutParams(-1, 0, 1));
+        outer.addView(shell, new FrameLayout.LayoutParams(-1, -1));
 
-        tabPages[0] = buildScanTab();
-        tabPages[1] = buildLookTab();
-        tabPages[2] = buildSettingsTab();
-        for (View v : tabPages) content.addView(v, new FrameLayout.LayoutParams(-1, -1));
-
+        // 上方工具列
+        LinearLayout bar = new LinearLayout(this);
+        bar.setOrientation(LinearLayout.HORIZONTAL);
+        bar.setGravity(Gravity.CENTER_VERTICAL);
+        bar.setPadding(dp(4), 0, dp(16), 0);
+        TextView menuBtn = text("☰", 26, TEXT, false);
+        menuBtn.setGravity(Gravity.CENTER);
+        menuBtn.setContentDescription("功能選單");
+        menuBtn.setOnClickListener(v -> openDrawer());
+        bar.addView(menuBtn, new LinearLayout.LayoutParams(dp(52), dp(52)));
+        pageTitle = text("", 19, TEXT, true);
+        bar.addView(pageTitle, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+        shell.addView(bar, new LinearLayout.LayoutParams(-1, dp(56)));
         View divider = new View(this);
         divider.setBackgroundColor(LINE);
         shell.addView(divider, new LinearLayout.LayoutParams(-1, dp(1)));
-        LinearLayout nav = new LinearLayout(this);
-        nav.setOrientation(LinearLayout.HORIZONTAL);
-        nav.setBackgroundColor(SURFACE);
-        for (int i = 0; i < 3; i++) {
-            TextView t = text(TAB_NAMES[i], 13, MUTED, false);
-            t.setGravity(Gravity.CENTER);
-            t.setPadding(0, dp(8), 0, dp(8));
+
+        FrameLayout content = new FrameLayout(this);
+        shell.addView(content, new LinearLayout.LayoutParams(-1, 0, 1));
+        tabPages[0] = buildScanTab();
+        tabPages[1] = buildLookTab();
+        for (View v : tabPages) content.addView(v, new FrameLayout.LayoutParams(-1, -1));
+
+        // 半透明遮罩＋左側選單
+        drawerDim = new View(this);
+        drawerDim.setBackgroundColor(0x80000000);
+        drawerDim.setVisibility(View.GONE);
+        drawerDim.setOnClickListener(v -> closeDrawer());
+        outer.addView(drawerDim, new FrameLayout.LayoutParams(-1, -1));
+
+        drawer = new LinearLayout(this);
+        drawer.setOrientation(LinearLayout.VERTICAL);
+        drawer.setBackgroundColor(SURFACE);
+        drawer.setPadding(dp(12), dp(24), dp(12), dp(24));
+        drawer.setVisibility(View.GONE);
+        drawer.setClickable(true);
+        if (Build.VERSION.SDK_INT >= 21) drawer.setElevation(dp(8));
+        TextView head = text("🛡️ 掃毒小幫手", 20, TEXT, true);
+        head.setPadding(dp(16), 0, dp(16), dp(16));
+        drawer.addView(head);
+        for (int i = 0; i < MENU_NAMES.length; i++) {
+            TextView item = menuItem(MENU_NAMES[i]);
             final int idx = i;
-            t.setOnClickListener(v -> showTab(idx));
-            tabButtons[i] = t;
-            nav.addView(t, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+            item.setOnClickListener(v -> {
+                showTab(idx);
+                closeDrawer();
+            });
+            menuItems[i] = item;
+            drawer.addView(item, new LinearLayout.LayoutParams(-1, dp(52)));
         }
-        shell.addView(nav, new LinearLayout.LayoutParams(-1, LinearLayout.LayoutParams.WRAP_CONTENT));
+        View sep = new View(this);
+        sep.setBackgroundColor(LINE);
+        LinearLayout.LayoutParams sepLp = new LinearLayout.LayoutParams(-1, dp(1));
+        sepLp.topMargin = dp(8);
+        sepLp.bottomMargin = dp(8);
+        drawer.addView(sep, sepLp);
+        TextView logout = menuItem("🚪  登出");
+        logout.setOnClickListener(v -> {
+            closeDrawer();
+            confirmLogout();
+        });
+        drawer.addView(logout, new LinearLayout.LayoutParams(-1, dp(52)));
+        outer.addView(drawer, new FrameLayout.LayoutParams(dp(280), -1, Gravity.START));
+
         showTab(0);
-        return shell;
+        return outer;
     }
 
     private Button exitButton(LinearLayout root) {
@@ -465,8 +560,13 @@ public class MainActivity extends Activity {
         LinearLayout root = new LinearLayout(this);
         ScrollView scroll = page(root);
 
-        root.addView(text("掃毒小幫手", 24, TEXT, true));
         root.addView(text("檢查手機上安裝的每一個 APP，用 70 多家防毒引擎做第二意見。", 14, MUTED, false));
+
+        systemCheck = new CheckBox(this);
+        systemCheck.setText("也檢查手機內建的系統 APP（數量多，會久很多）");
+        systemCheck.setTextColor(TEXT);
+        systemCheck.setButtonTintList(ColorStateList.valueOf(LINK));
+        root.addView(systemCheck, wide(12));
 
         LinearLayout actions = new LinearLayout(this);
         actions.setOrientation(LinearLayout.HORIZONTAL);
@@ -508,43 +608,10 @@ public class MainActivity extends Activity {
     private View buildLookTab() {
         LinearLayout root = new LinearLayout(this);
         ScrollView scroll = page(root);
-        root.addView(text("外觀", 24, TEXT, true));
         root.addView(text("挑一個喜歡的主題顏色，也可以放自己的照片當底圖。", 14, MUTED, false));
         View look = buildLookPanel();
         look.setVisibility(View.VISIBLE);
-        root.addView(look, wide(16));
-        return scroll;
-    }
-
-    private View buildSettingsTab() {
-        LinearLayout root = new LinearLayout(this);
-        ScrollView scroll = page(root);
-        root.addView(text("設定", 24, TEXT, true));
-
-        root.addView(text("掃描範圍", 14, MUTED, false), wide(16));
-        systemCheck = new CheckBox(this);
-        systemCheck.setText("也檢查手機內建的系統 APP（數量多，會久很多）");
-        systemCheck.setTextColor(TEXT);
-        systemCheck.setButtonTintList(ColorStateList.valueOf(LINK));
-        root.addView(systemCheck, wide(4));
-
-        root.addView(text("伺服器網址（一般不用改）", 14, MUTED, false), wide(16));
-        serverInput = input("https://…", prefs.getString("server", DEFAULT_SERVER), false);
-        root.addView(serverInput, wide(4));
-
-        Button logout = button("更換親友密碼", false);
-        logout.setOnClickListener(v -> {
-            if (scanning()) {
-                toastDialog("請先停止掃描，再更換密碼。");
-                return;
-            }
-            prefs.edit().remove("password").remove("saved_password").apply();
-            showPage(false);
-        });
-        root.addView(logout, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(48)) {{
-            topMargin = dp(24);
-        }});
-        exitButton(root);
+        root.addView(look, wide(12));
         return scroll;
     }
 
@@ -591,6 +658,16 @@ public class MainActivity extends Activity {
         root.addView(exitButton, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(48)) {{
             topMargin = dp(12);
         }});
+        TextView advToggle = text("進階：伺服器網址 ▸", 13, MUTED, false);
+        root.addView(advToggle, wide(24));
+        serverInput = input("https://…", prefs.getString("server", DEFAULT_SERVER), false);
+        serverInput.setVisibility(View.GONE);
+        root.addView(serverInput, wide(6));
+        advToggle.setOnClickListener(v -> {
+            boolean show = serverInput.getVisibility() != View.VISIBLE;
+            serverInput.setVisibility(show ? View.VISIBLE : View.GONE);
+            advToggle.setText(show ? "進階：伺服器網址（一般不用改）▾" : "進階：伺服器網址 ▸");
+        });
         passwordInput.setOnEditorActionListener((v, actionId, event) -> {
             checkPassword();
             return true;
@@ -617,7 +694,9 @@ public class MainActivity extends Activity {
             loginError.setVisibility(View.VISIBLE);
             return;
         }
-        String server = prefs.getString("server", DEFAULT_SERVER).replaceAll("/+$", "");
+        String typed = serverInput.getText().toString().trim().replaceAll("/+$", "");
+        final String server = typed.isEmpty() ? DEFAULT_SERVER : typed;
+        prefs.edit().putString("server", server).apply();
         loginButton.setEnabled(false);
         loginButton.setText("確認中…");
         loginError.setVisibility(View.GONE);
@@ -1025,8 +1104,9 @@ public class MainActivity extends Activity {
     @Override
     @SuppressWarnings("deprecation")
     public void onBackPressed() {
-        // 掃描中按返回鍵也先確認，避免不小心中斷
-        confirmExit();
+        // 選單開著時，返回鍵先把選單關掉；掃描中按返回鍵也先確認，避免不小心中斷
+        if (drawerOpen()) closeDrawer();
+        else confirmExit();
     }
 
     private void toastDialog(String msg) {
