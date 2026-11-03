@@ -4,14 +4,14 @@ plugins {
 
 android {
     namespace = "tw.celeste.saodu"
-    compileSdk = 34
+    compileSdk = 35
 
     defaultConfig {
         applicationId = "tw.celeste.saodu"
-        minSdk = 24
-        targetSdk = 34
-        versionCode = 5
-        versionName = "1.4"
+        minSdk = 21
+        targetSdk = 35
+        versionCode = 6
+        versionName = "1.5"
     }
 
     // 簽章檔放在 GitHub 的 Secrets（不放進公開程式庫），打包時才還原。

@@ -94,6 +94,9 @@ public class MainActivity extends Activity {
         prefs = getSharedPreferences("settings", MODE_PRIVATE);
         cache = getSharedPreferences("scan_cache", MODE_PRIVATE);
         android.widget.FrameLayout frame = new android.widget.FrameLayout(this);
+        // Android 15 以上畫面會延伸到狀態列和導覽列底下，這行讓內容自動避開它們
+        frame.setFitsSystemWindows(true);
+        frame.setBackgroundColor(Color.parseColor("#F4F7FC"));
         loginPage = buildLoginPage();
         scanPage = buildLayout();
         frame.addView(loginPage);
