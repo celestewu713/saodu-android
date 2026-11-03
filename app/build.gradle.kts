@@ -17,7 +17,7 @@ android {
     // 簽章檔放在 GitHub 的 Secrets（不放進公開程式庫），打包時才還原。
     // 固定使用同一把簽章，之後的新版本才能直接覆蓋安裝。
     val keystorePath = System.getenv("SIGNING_KEYSTORE_PATH")
-    val keystorePassword = System.getenv("SIGNING_PASSWORD")
+    val keystorePassword = System.getenv("SIGNING_PASSWORD")?.trim()
     val hasFamilyKey = !keystorePath.isNullOrBlank() && !keystorePassword.isNullOrBlank()
 
     signingConfigs {

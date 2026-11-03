@@ -12,9 +12,9 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
@@ -26,9 +26,17 @@ jobs:
       - name: 還原簽章檔
         env:
           SIGNING_KEYSTORE_BASE64: ${{ secrets.SIGNING_KEYSTORE_BASE64 }}
+          SIGNING_PASSWORD: ${{ secrets.SIGNING_PASSWORD }}
         run: |
           if [ -n "$SIGNING_KEYSTORE_BASE64" ]; then
-            echo "$SIGNING_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/saodu.keystore"
+            # 去掉貼上時可能多出的空白或換行
+            printf '%s' "$SIGNING_KEYSTORE_BASE64" | tr -d ' \r\n\t' | base64 -d > "$RUNNER_TEMP/saodu.keystore"
+            echo "簽章檔大小：$(wc -c < "$RUNNER_TEMP/saodu.keystore") bytes，指紋前 16 碼：$(sha256sum "$RUNNER_TEMP/saodu.keystore" | cut -c1-16)"
+            PW="$(printf '%s' "$SIGNING_PASSWORD" | tr -d '\r\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+            if ! keytool -list -keystore "$RUNNER_TEMP/saodu.keystore" -storepass "$PW" -alias saodu > /dev/null 2>&1; then
+              echo "::error::簽章檔或密碼不正確：請重新複製 Android簽章資料.txt 裡的兩個值到 GitHub Secrets。"
+              exit 1
+            fi
             echo "SIGNING_KEYSTORE_PATH=$RUNNER_TEMP/saodu.keystore" >> "$GITHUB_ENV"
           else
             echo "::warning::沒有設定 SIGNING_KEYSTORE_BASE64，這次改用臨時簽章。"
