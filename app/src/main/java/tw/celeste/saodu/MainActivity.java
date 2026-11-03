@@ -72,6 +72,7 @@ public class MainActivity extends Activity {
     private EditText serverInput;
     private EditText passwordInput;     // 登入頁的密碼欄
     private TextView loginError;
+    private CheckBox rememberCheck;
     private Button loginButton;
     private View loginPage;
     private View scanPage;
@@ -98,8 +99,8 @@ public class MainActivity extends Activity {
         frame.addView(loginPage);
         frame.addView(scanPage);
         setContentView(frame);
-        // 之前輸入過正確密碼就直接進入掃描頁
-        showPage(!prefs.getString("password", "").isEmpty());
+        // 每次打開都先顯示登入頁；有記住密碼時會自動填好，按「進入」即可
+        showPage(false);
     }
 
     private int dp(int v) {
@@ -188,7 +189,7 @@ public class MainActivity extends Activity {
                 toastDialog("請先停止掃描，再更換密碼。");
                 return;
             }
-            prefs.edit().remove("password").apply();
+            prefs.edit().remove("password").remove("saved_password").apply();
             showPage(false);
         });
         adv.addView(logout, wide(12));
@@ -264,6 +265,11 @@ public class MainActivity extends Activity {
 
         passwordInput = input("密碼請向 Celeste 索取", "", true);
         root.addView(passwordInput, wide(24));
+        rememberCheck = new CheckBox(this);
+        rememberCheck.setText("記住密碼（下次自動填入）");
+        rememberCheck.setTextColor(TEXT);
+        rememberCheck.setChecked(prefs.getBoolean("remember", true));
+        root.addView(rememberCheck, wide(8));
         loginError = text("", 14, DANGER, false);
         loginError.setVisibility(View.GONE);
         root.addView(loginError, wide(8));
@@ -288,7 +294,9 @@ public class MainActivity extends Activity {
         loginPage.setVisibility(scan ? View.GONE : View.VISIBLE);
         scanPage.setVisibility(scan ? View.VISIBLE : View.GONE);
         if (!scan) {
-            passwordInput.setText("");
+            boolean remember = prefs.getBoolean("remember", true);
+            rememberCheck.setChecked(remember);
+            passwordInput.setText(remember ? prefs.getString("saved_password", prefs.getString("password", "")) : "");
             loginButton.setEnabled(true);
             loginButton.setText("進入");
         }
@@ -309,7 +317,13 @@ public class MainActivity extends Activity {
             HttpResult r = request(server + "/api/login", "POST", password);
             ui.post(() -> {
                 if (r.status == 200) {
-                    prefs.edit().putString("password", password).apply();
+                    boolean remember = rememberCheck.isChecked();
+                    SharedPreferences.Editor e = prefs.edit()
+                            .putString("password", password)          // 這次使用中的密碼
+                            .putBoolean("remember", remember);
+                    if (remember) e.putString("saved_password", password);
+                    else e.remove("saved_password");
+                    e.apply();
                     android.view.inputmethod.InputMethodManager imm =
                             (android.view.inputmethod.InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
                     if (imm != null) imm.hideSoftInputFromWindow(passwordInput.getWindowToken(), 0);
@@ -434,7 +448,7 @@ public class MainActivity extends Activity {
         } catch (AuthException e) {
             finalMessage = "親友密碼已變更，請重新輸入。";
             ui.post(() -> {
-                prefs.edit().remove("password").apply();
+                prefs.edit().remove("password").remove("saved_password").apply();
                 showPage(false);
                 loginError.setText("親友密碼已變更，請重新輸入。");
                 loginError.setVisibility(View.VISIBLE);
