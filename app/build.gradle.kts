@@ -10,8 +10,8 @@ android {
         applicationId = "tw.celeste.saodu"
         minSdk = 21
         targetSdk = 35
-        versionCode = 9
-        versionName = "1.8"
+        versionCode = 10
+        versionName = "1.9"
     }
 
     // 簽章檔放在 GitHub 的 Secrets（不放進公開程式庫），打包時才還原。

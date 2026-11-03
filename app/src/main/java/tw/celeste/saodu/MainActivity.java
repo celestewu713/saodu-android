@@ -2,6 +2,9 @@ package tw.celeste.saodu;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.content.ClipData;
+import android.content.ClipboardManager;
+import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.res.ColorStateList;
@@ -50,6 +53,8 @@ import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * 掃毒小幫手 Android 版：掃描手機上已安裝的 APP。
@@ -407,10 +412,10 @@ public class MainActivity extends Activity {
     }
 
     // 功能選單（左上角 ☰）：每次只顯示一個功能的畫面
-    private static final String[] MENU_NAMES = {"🛡️  掃毒", "🎨  外觀設定"};
-    private static final String[] PAGE_TITLES = {"掃毒", "外觀設定"};
-    private final View[] tabPages = new View[2];
-    private final TextView[] menuItems = new TextView[2];
+    private static final String[] MENU_NAMES = {"🛡️  掃毒", "🎨  外觀設定", "🔑  我的金鑰"};
+    private static final String[] PAGE_TITLES = {"掃毒", "外觀設定", "我的金鑰"};
+    private final View[] tabPages = new View[3];
+    private final TextView[] menuItems = new TextView[3];
     private int currentTab = 0;
     private TextView pageTitle;
     private View drawerDim;
@@ -500,6 +505,7 @@ public class MainActivity extends Activity {
         shell.addView(content, new LinearLayout.LayoutParams(-1, 0, 1));
         tabPages[0] = buildScanTab();
         tabPages[1] = buildLookTab();
+        tabPages[2] = buildKeyTab();
         for (View v : tabPages) content.addView(v, new FrameLayout.LayoutParams(-1, -1));
 
         // 半透明遮罩＋左側選單
@@ -602,6 +608,156 @@ public class MainActivity extends Activity {
             cancelled = true;
             statusText.setText("正在停止…");
         });
+        return scroll;
+    }
+
+    // ------------------------------------------------------------------ 我的金鑰
+
+    private static final Pattern KEY_PATTERN = Pattern.compile("\\b[0-9a-fA-F]{64}\\b");
+    private TextView keyStatus;
+    private EditText keyInput;
+    private Button keyClear;
+    private boolean waitingForKey = false;   // 按了①或②，回到 APP 時要自動偵測剪貼簿
+
+    private String myKey() {
+        return prefs.getString("vt_key", "");
+    }
+
+    private static String findKey(CharSequence text) {
+        if (text == null) return null;
+        Matcher m = KEY_PATTERN.matcher(text);
+        return m.find() ? m.group().toLowerCase() : null;
+    }
+
+    private String clipboardKey() {
+        try {
+            ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+            if (cm == null || !cm.hasPrimaryClip()) return null;
+            ClipData clip = cm.getPrimaryClip();
+            if (clip == null || clip.getItemCount() == 0) return null;
+            return findKey(clip.getItemAt(0).coerceToText(this));
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private void saveKey(String key) {
+        prefs.edit().putString("vt_key", key).apply();
+        waitingForKey = false;
+        refreshKeyStatus();
+        keyStatus.setText("✅ 已儲存！之後的掃描都會使用你自己的金鑰，不會占用大家共用的額度。");
+        keyStatus.setTextColor(CLEAN);
+    }
+
+    private void refreshKeyStatus() {
+        boolean has = !myKey().isEmpty();
+        String k = myKey();
+        keyStatus.setText(has ? "✅ 目前使用你自己的金鑰（…" + k.substring(k.length() - 4) + "）。"
+                : "目前使用大家共用的額度。");
+        keyStatus.setTextColor(has ? CLEAN : MUTED);
+        keyClear.setVisibility(has ? View.VISIBLE : View.GONE);
+    }
+
+    private void openWeb(String url) {
+        waitingForKey = true;
+        try {
+            startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
+        } catch (Exception e) {
+            toastDialog("找不到瀏覽器，請用手機瀏覽器打開：\n" + url);
+        }
+    }
+
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        // Android 10 以上只有在 APP 畫面在前景時才能讀剪貼簿，所以在這裡偵測
+        if (!hasFocus || !waitingForKey || scanPage == null || scanPage.getVisibility() != View.VISIBLE) return;
+        String k = clipboardKey();
+        if (k == null || k.equals(myKey())) return;
+        waitingForKey = false;
+        showTab(2);
+        new AlertDialog.Builder(this)
+                .setTitle("偵測到 VirusTotal 金鑰")
+                .setMessage("剛剛複製的金鑰（…" + k.substring(60) + "）要用在掃毒小幫手嗎？")
+                .setPositiveButton("使用這組金鑰", (d, w) -> saveKey(k))
+                .setNegativeButton("先不要", null)
+                .show();
+    }
+
+    private Button stepButton(String label, View.OnClickListener l) {
+        Button b = button(label, false);
+        b.setTextColor(LINK);
+        GradientDrawable g = box(SURFACE, LINK);
+        g.setCornerRadius(dp(10));
+        b.setBackground(g);
+        b.setOnClickListener(l);
+        return b;
+    }
+
+    private View buildKeyTab() {
+        LinearLayout root = new LinearLayout(this);
+        ScrollView scroll = page(root);
+        root.addView(text("用自己的 VirusTotal 金鑰（選填，免費）", 17, TEXT, true));
+        root.addView(text("填了之後，掃描會用你自己的免費額度（每天 500 次），不會占用大家共用的額度。金鑰只存在這支手機裡。不填也照常可以使用。", 14, MUTED, false), wide(6));
+
+        root.addView(text("① 註冊帳號（已經有帳號可跳過）", 15, TEXT, true), wide(20));
+        root.addView(text("可以用 Google 帳號一鍵註冊，註冊後到信箱點驗證信。", 13, MUTED, false), wide(2));
+        root.addView(stepButton("前往註冊", v -> openWeb("https://www.virustotal.com/gui/join-us")),
+                new LinearLayout.LayoutParams(-1, dp(46)) {{ topMargin = dp(8); }});
+
+        root.addView(text("② 複製金鑰", 15, TEXT, true), wide(20));
+        root.addView(text("登入後會看到「API Key」，按旁邊的複製圖示 📋，然後回到這個 APP。", 13, MUTED, false), wide(2));
+        root.addView(stepButton("打開我的金鑰", v -> openWeb("https://www.virustotal.com/gui/my-apikey")),
+                new LinearLayout.LayoutParams(-1, dp(46)) {{ topMargin = dp(8); }});
+
+        root.addView(text("③ 回到 APP 自動填入", 15, TEXT, true), wide(20));
+        root.addView(text("回來時會自動偵測剛複製的金鑰並詢問是否使用。沒有跳出來的話，按下面按鈕。", 13, MUTED, false), wide(2));
+        Button paste = button("一鍵貼上金鑰", true);
+        paste.setOnClickListener(v -> {
+            String k = clipboardKey();
+            if (k == null) {
+                keyStatus.setText("⚠️ 剪貼簿裡沒有找到金鑰。請到 VirusTotal 的「API Key」按複製圖示後再試一次（金鑰是 64 個英文和數字）。");
+                keyStatus.setTextColor(WARN);
+            } else {
+                saveKey(k);
+            }
+        });
+        root.addView(paste, new LinearLayout.LayoutParams(-1, dp(50)) {{ topMargin = dp(8); }});
+
+        root.addView(text("或手動貼上", 13, MUTED, false), wide(20));
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        keyInput = input("64 碼的金鑰", "", true);
+        row.addView(keyInput, new LinearLayout.LayoutParams(0, dp(48), 1));
+        Button save = button("儲存", false);
+        save.setOnClickListener(v -> {
+            String k = findKey(keyInput.getText());
+            if (k == null) {
+                keyStatus.setText("⚠️ 格式不對：金鑰是 64 個英文和數字，請整串複製貼上。");
+                keyStatus.setTextColor(WARN);
+            } else {
+                keyInput.setText("");
+                saveKey(k);
+            }
+        });
+        LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(48));
+        slp.leftMargin = dp(8);
+        row.addView(save, slp);
+        root.addView(row, wide(4));
+
+        keyStatus = text("", 14, MUTED, false);
+        root.addView(keyStatus, wide(16));
+        keyClear = button("清除我的金鑰（改回共用額度）", false);
+        keyClear.setOnClickListener(v -> new AlertDialog.Builder(this)
+                .setMessage("確定要清除你的金鑰嗎？之後會改用大家共用的額度。")
+                .setPositiveButton("清除", (d, w) -> {
+                    prefs.edit().remove("vt_key").apply();
+                    refreshKeyStatus();
+                })
+                .setNegativeButton("取消", null)
+                .show());
+        root.addView(keyClear, new LinearLayout.LayoutParams(-1, dp(46)) {{ topMargin = dp(8); }});
+        refreshKeyStatus();
         return scroll;
     }
 
@@ -813,6 +969,10 @@ public class MainActivity extends Activity {
                         break;
                     } else if (r.status == 401) {
                         throw new AuthException();
+                    } else if (r.status == 400 && !myKey().isEmpty()) {
+                        String detail = "你填的 VirusTotal 金鑰有問題";
+                        try { detail = new JSONObject(r.body).optString("detail", detail); } catch (Exception ignored) { }
+                        throw new Exception(detail + "（可到 ☰ →「我的金鑰」修改）");
                     } else if (r.status == 429) {
                         setStatus("查詢額度暫時用完，等一分鐘後繼續…（" + app.label + "）");
                         sleepQuietly(60_000);
@@ -921,6 +1081,8 @@ public class MainActivity extends Activity {
             // 與網頁版相同：密碼先做 URL 編碼，中文密碼也能放進標頭
             c.setRequestProperty("X-App-Password", URLEncoder.encode(password, "UTF-8").replace("+", "%20"));
             c.setRequestProperty("Accept", "application/json");
+            String vtKey = myKey();
+            if (!vtKey.isEmpty()) c.setRequestProperty("X-VT-Key", vtKey);
             r.status = c.getResponseCode();
             InputStream in = r.status >= 400 ? c.getErrorStream() : c.getInputStream();
             if (in != null) {
