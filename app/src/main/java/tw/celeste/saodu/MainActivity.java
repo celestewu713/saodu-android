@@ -455,6 +455,21 @@ public class MainActivity extends Activity {
                 .withEndAction(() -> drawer.setVisibility(View.GONE)).start();
     }
 
+    /** APP 版本號（例如 2.0），顯示在登入頁和選單，方便確認有沒有更新到最新版。 */
+    private String appVersion() {
+        try {
+            return getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
+        } catch (Exception e) {
+            return "?";
+        }
+    }
+
+    private TextView versionLabel() {
+        TextView t = text("版本 " + appVersion(), 12, MUTED, false);
+        t.setGravity(Gravity.CENTER_HORIZONTAL);
+        return t;
+    }
+
     private TextView menuItem(String label) {
         TextView t = text(label, 17, TEXT, false);
         t.setGravity(Gravity.CENTER_VERTICAL);
@@ -547,6 +562,9 @@ public class MainActivity extends Activity {
             confirmLogout();
         });
         drawer.addView(logout, new LinearLayout.LayoutParams(-1, dp(52)));
+        View spacer = new View(this);
+        drawer.addView(spacer, new LinearLayout.LayoutParams(-1, 0, 1));
+        drawer.addView(versionLabel(), new LinearLayout.LayoutParams(-1, LinearLayout.LayoutParams.WRAP_CONTENT));
         outer.addView(drawer, new FrameLayout.LayoutParams(dp(280), -1, Gravity.START));
 
         showTab(0);
@@ -824,6 +842,7 @@ public class MainActivity extends Activity {
             serverInput.setVisibility(show ? View.VISIBLE : View.GONE);
             advToggle.setText(show ? "進階：伺服器網址（一般不用改）▾" : "進階：伺服器網址 ▸");
         });
+        root.addView(versionLabel(), wide(24));
         passwordInput.setOnEditorActionListener((v, actionId, event) -> {
             checkPassword();
             return true;
