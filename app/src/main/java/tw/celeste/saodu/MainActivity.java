@@ -70,7 +70,11 @@ public class MainActivity extends Activity {
     private SharedPreferences cache;
 
     private EditText serverInput;
-    private EditText passwordInput;
+    private EditText passwordInput;     // 登入頁的密碼欄
+    private TextView loginError;
+    private Button loginButton;
+    private View loginPage;
+    private View scanPage;
     private CheckBox systemCheck;
     private Button startButton;
     private Button stopButton;
@@ -88,7 +92,14 @@ public class MainActivity extends Activity {
         super.onCreate(savedInstanceState);
         prefs = getSharedPreferences("settings", MODE_PRIVATE);
         cache = getSharedPreferences("scan_cache", MODE_PRIVATE);
-        setContentView(buildLayout());
+        android.widget.FrameLayout frame = new android.widget.FrameLayout(this);
+        loginPage = buildLoginPage();
+        scanPage = buildLayout();
+        frame.addView(loginPage);
+        frame.addView(scanPage);
+        setContentView(frame);
+        // 之前輸入過正確密碼就直接進入掃描頁
+        showPage(!prefs.getString("password", "").isEmpty());
     }
 
     private int dp(int v) {
@@ -159,10 +170,6 @@ public class MainActivity extends Activity {
         root.addView(text("掃毒小幫手", 24, TEXT, true));
         root.addView(text("檢查手機上安裝的每一個 APP，用 70 多家防毒引擎做第二意見。", 14, MUTED, false));
 
-        root.addView(text("親友密碼", 15, TEXT, true), wide(20));
-        passwordInput = input("輸入 Celeste 給你的密碼", prefs.getString("password", ""), true);
-        root.addView(passwordInput, wide(6));
-
         TextView advToggle = text("進階設定 ▸", 14, GREEN, false);
         root.addView(advToggle, wide(12));
         LinearLayout adv = new LinearLayout(this);
@@ -175,6 +182,16 @@ public class MainActivity extends Activity {
         systemCheck.setText("也檢查手機內建的系統 APP（數量多，會久很多）");
         systemCheck.setTextColor(TEXT);
         adv.addView(systemCheck, wide(8));
+        TextView logout = text("更換親友密碼", 14, GREEN, false);
+        logout.setOnClickListener(v -> {
+            if (worker != null && worker.isAlive()) {
+                toastDialog("請先停止掃描，再更換密碼。");
+                return;
+            }
+            prefs.edit().remove("password").apply();
+            showPage(false);
+        });
+        adv.addView(logout, wide(12));
         root.addView(adv, wide(4));
         advToggle.setOnClickListener(v -> {
             boolean show = adv.getVisibility() != View.VISIBLE;
@@ -216,6 +233,89 @@ public class MainActivity extends Activity {
         return scroll;
     }
 
+    // ------------------------------------------------------------------ 登入頁
+
+    private View buildLoginPage() {
+        ScrollView scroll = new ScrollView(this);
+        scroll.setBackgroundColor(Color.parseColor("#F5F7F6"));
+        scroll.setFillViewport(true);
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setGravity(Gravity.CENTER_VERTICAL);
+        root.setPadding(dp(24), dp(32), dp(24), dp(32));
+        scroll.addView(root, new ScrollView.LayoutParams(
+                ScrollView.LayoutParams.MATCH_PARENT, ScrollView.LayoutParams.MATCH_PARENT));
+
+        TextView icon = text("🛡️", 48, TEXT, false);
+        icon.setGravity(Gravity.CENTER_HORIZONTAL);
+        root.addView(icon, wide(0));
+        TextView title = text("掃毒小幫手", 26, TEXT, true);
+        title.setGravity(Gravity.CENTER_HORIZONTAL);
+        root.addView(title, wide(8));
+        TextView sub = text("請輸入親友密碼", 15, MUTED, false);
+        sub.setGravity(Gravity.CENTER_HORIZONTAL);
+        root.addView(sub, wide(4));
+
+        passwordInput = input("密碼請向 Celeste 索取", "", true);
+        root.addView(passwordInput, wide(24));
+        loginError = text("", 14, DANGER, false);
+        loginError.setVisibility(View.GONE);
+        root.addView(loginError, wide(8));
+        loginButton = button("進入", true);
+        root.addView(loginButton, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(52)) {{
+            topMargin = dp(16);
+        }});
+        loginButton.setOnClickListener(v -> checkPassword());
+        passwordInput.setOnEditorActionListener((v, actionId, event) -> {
+            checkPassword();
+            return true;
+        });
+        return scroll;
+    }
+
+    private void showPage(boolean scan) {
+        loginPage.setVisibility(scan ? View.GONE : View.VISIBLE);
+        scanPage.setVisibility(scan ? View.VISIBLE : View.GONE);
+        if (!scan) {
+            passwordInput.setText("");
+            loginButton.setEnabled(true);
+            loginButton.setText("進入");
+        }
+    }
+
+    private void checkPassword() {
+        String password = passwordInput.getText().toString();
+        if (password.isEmpty()) {
+            loginError.setText("請輸入密碼。");
+            loginError.setVisibility(View.VISIBLE);
+            return;
+        }
+        String server = prefs.getString("server", DEFAULT_SERVER).replaceAll("/+$", "");
+        loginButton.setEnabled(false);
+        loginButton.setText("確認中…");
+        loginError.setVisibility(View.GONE);
+        new Thread(() -> {
+            HttpResult r = request(server + "/api/login", "POST", password);
+            ui.post(() -> {
+                if (r.status == 200) {
+                    prefs.edit().putString("password", password).apply();
+                    android.view.inputmethod.InputMethodManager imm =
+                            (android.view.inputmethod.InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
+                    if (imm != null) imm.hideSoftInputFromWindow(passwordInput.getWindowToken(), 0);
+                    showPage(true);
+                    return;
+                }
+                loginButton.setEnabled(true);
+                loginButton.setText("進入");
+                loginError.setText(r.status == 401 ? "密碼不正確，請再試一次。"
+                        : r.status == 429 ? "密碼錯誤太多次，請 10 分鐘後再試。"
+                        : r.status == 0 ? "連不上伺服器，請確認網路。"
+                        : "伺服器回應錯誤（" + r.status + "）。");
+                loginError.setVisibility(View.VISIBLE);
+            });
+        }).start();
+    }
+
     // ------------------------------------------------------------------ 掃描
 
     private static class AppItem {
@@ -228,16 +328,16 @@ public class MainActivity extends Activity {
 
     private void startScan() {
         String server = serverInput.getText().toString().trim().replaceAll("/+$", "");
-        String password = passwordInput.getText().toString();
+        String password = prefs.getString("password", "");
         if (password.isEmpty()) {
-            toastDialog("請先輸入親友密碼。");
+            showPage(false);
             return;
         }
         if (!server.startsWith("https://")) {
             toastDialog("伺服器網址要以 https:// 開頭。");
             return;
         }
-        prefs.edit().putString("password", password).putString("server", server).apply();
+        prefs.edit().putString("server", server).apply();
 
         cancelled = false;
         startButton.setEnabled(false);
@@ -321,7 +421,13 @@ public class MainActivity extends Activity {
             }
             finalMessage = cancelled ? "已停止。已檢查的結果如下，下次掃描會接著查。" : "掃描完成！";
         } catch (AuthException e) {
-            finalMessage = "親友密碼不正確，請重新輸入後再試。";
+            finalMessage = "親友密碼已變更，請重新輸入。";
+            ui.post(() -> {
+                prefs.edit().remove("password").apply();
+                showPage(false);
+                loginError.setText("親友密碼已變更，請重新輸入。");
+                loginError.setVisibility(View.VISIBLE);
+            });
         } catch (Exception e) {
             finalMessage = "發生錯誤：" + e.getMessage();
         }
@@ -385,10 +491,19 @@ public class MainActivity extends Activity {
     }
 
     private HttpResult query(String server, String password, String sha) {
+        return request(server + "/api/file/" + sha, "GET", password);
+    }
+
+    private HttpResult request(String url, String method, String password) {
         HttpResult r = new HttpResult();
         HttpURLConnection c = null;
         try {
-            c = (HttpURLConnection) new URL(server + "/api/file/" + sha).openConnection();
+            c = (HttpURLConnection) new URL(url).openConnection();
+            c.setRequestMethod(method);
+            if ("POST".equals(method)) {
+                c.setDoOutput(true);
+                c.setFixedLengthStreamingMode(0);
+            }
             c.setConnectTimeout(15_000);
             c.setReadTimeout(30_000);
             // 與網頁版相同：密碼先做 URL 編碼，中文密碼也能放進標頭
