@@ -222,8 +222,14 @@ public class MainActivity extends Activity {
         resultList.setOrientation(LinearLayout.VERTICAL);
         root.addView(resultList, wide(12));
 
+        Button exitButton = button("離開 APP", false);
+        exitButton.setOnClickListener(v -> confirmExit());
+        root.addView(exitButton, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(48)) {{
+            topMargin = dp(24);
+        }});
+
         TextView foot = text("這是「第二意見」工具，日常防護請保留 Google Play 安全防護。", 12, MUTED, false);
-        root.addView(foot, wide(20));
+        root.addView(foot, wide(16));
 
         startButton.setOnClickListener(v -> startScan());
         stopButton.setOnClickListener(v -> {
@@ -266,6 +272,11 @@ public class MainActivity extends Activity {
             topMargin = dp(16);
         }});
         loginButton.setOnClickListener(v -> checkPassword());
+        Button exitButton = button("離開 APP", false);
+        exitButton.setOnClickListener(v -> confirmExit());
+        root.addView(exitButton, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(48)) {{
+            topMargin = dp(12);
+        }});
         passwordInput.setOnEditorActionListener((v, actionId, event) -> {
             checkPassword();
             return true;
@@ -670,6 +681,30 @@ public class MainActivity extends Activity {
                 return;
             }
         }
+    }
+
+    private void confirmExit() {
+        if (worker != null && worker.isAlive()) {
+            new AlertDialog.Builder(this)
+                    .setMessage("掃描還在進行中，確定要離開嗎？\n已經查過的 APP 會保留紀錄，下次掃描會接著查。")
+                    .setPositiveButton("離開", (d, w) -> exitApp())
+                    .setNegativeButton("繼續掃描", null)
+                    .show();
+        } else {
+            exitApp();
+        }
+    }
+
+    private void exitApp() {
+        cancelled = true;
+        finishAndRemoveTask();
+    }
+
+    @Override
+    @SuppressWarnings("deprecation")
+    public void onBackPressed() {
+        // 掃描中按返回鍵也先確認，避免不小心中斷
+        confirmExit();
     }
 
     private void toastDialog(String msg) {
