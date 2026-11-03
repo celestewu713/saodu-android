@@ -129,22 +129,20 @@ public class MainActivity extends Activity {
         // 只有換主題時（畫面重建）才直接回到掃描頁。
         boolean unlocked = savedInstanceState != null && savedInstanceState.getBoolean("unlocked", false);
         showPage(unlocked);
-        if (unlocked && savedInstanceState.getBoolean("look_open", false)) openLook();
+        if (unlocked) showTab(savedInstanceState.getInt("tab", 0));
     }
 
     @Override
     protected void onSaveInstanceState(Bundle out) {
         super.onSaveInstanceState(out);
         out.putBoolean("unlocked", scanPage != null && scanPage.getVisibility() == View.VISIBLE);
-        out.putBoolean("look_open", lookPanel != null && lookPanel.getVisibility() == View.VISIBLE);
+        out.putInt("tab", currentTab);
     }
 
     // ------------------------------------------------------------------ 主題與底圖
 
     private ImageView bgImage;
     private View bgScrim;
-    private LinearLayout lookPanel;
-    private TextView lookToggle;
     private Button removeBgButton;
 
     private static int c(String hex) {
@@ -293,11 +291,6 @@ public class MainActivity extends Activity {
         }
     }
 
-    private void openLook() {
-        lookPanel.setVisibility(View.VISIBLE);
-        lookToggle.setText("外觀（主題顏色、底圖） ▾");
-    }
-
     private View buildLookPanel() {
         LinearLayout p = new LinearLayout(this);
         p.setOrientation(LinearLayout.VERTICAL);
@@ -405,58 +398,75 @@ public class MainActivity extends Activity {
         return e;
     }
 
-    private View buildLayout() {
+    private ScrollView page(LinearLayout root) {
         ScrollView scroll = new ScrollView(this);
-        LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(dp(16), dp(20), dp(16), dp(32));
         scroll.addView(root);
+        return scroll;
+    }
+
+    private static final String[] TAB_NAMES = {"🛡️\n掃毒", "🎨\n外觀", "⚙️\n設定"};
+    private final View[] tabPages = new View[3];
+    private final TextView[] tabButtons = new TextView[3];
+    private int currentTab = 0;
+
+    private void showTab(int i) {
+        currentTab = i;
+        for (int k = 0; k < 3; k++) {
+            tabPages[k].setVisibility(k == i ? View.VISIBLE : View.GONE);
+            tabButtons[k].setTextColor(k == i ? LINK : MUTED);
+            tabButtons[k].setTypeface(k == i ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT);
+        }
+    }
+
+    /** 登入後的畫面：上面是內容，下面是「掃毒／外觀／設定」選單。 */
+    private View buildLayout() {
+        LinearLayout shell = new LinearLayout(this);
+        shell.setOrientation(LinearLayout.VERTICAL);
+        FrameLayout content = new FrameLayout(this);
+        shell.addView(content, new LinearLayout.LayoutParams(-1, 0, 1));
+
+        tabPages[0] = buildScanTab();
+        tabPages[1] = buildLookTab();
+        tabPages[2] = buildSettingsTab();
+        for (View v : tabPages) content.addView(v, new FrameLayout.LayoutParams(-1, -1));
+
+        View divider = new View(this);
+        divider.setBackgroundColor(LINE);
+        shell.addView(divider, new LinearLayout.LayoutParams(-1, dp(1)));
+        LinearLayout nav = new LinearLayout(this);
+        nav.setOrientation(LinearLayout.HORIZONTAL);
+        nav.setBackgroundColor(SURFACE);
+        for (int i = 0; i < 3; i++) {
+            TextView t = text(TAB_NAMES[i], 13, MUTED, false);
+            t.setGravity(Gravity.CENTER);
+            t.setPadding(0, dp(8), 0, dp(8));
+            final int idx = i;
+            t.setOnClickListener(v -> showTab(idx));
+            tabButtons[i] = t;
+            nav.addView(t, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+        }
+        shell.addView(nav, new LinearLayout.LayoutParams(-1, LinearLayout.LayoutParams.WRAP_CONTENT));
+        showTab(0);
+        return shell;
+    }
+
+    private Button exitButton(LinearLayout root) {
+        Button exitButton = button("離開 APP", false);
+        exitButton.setOnClickListener(v -> confirmExit());
+        root.addView(exitButton, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(48)) {{
+            topMargin = dp(24);
+        }});
+        return exitButton;
+    }
+
+    private View buildScanTab() {
+        LinearLayout root = new LinearLayout(this);
+        ScrollView scroll = page(root);
 
         root.addView(text("掃毒小幫手", 24, TEXT, true));
         root.addView(text("檢查手機上安裝的每一個 APP，用 70 多家防毒引擎做第二意見。", 14, MUTED, false));
-
-        lookToggle = text("外觀（主題顏色、底圖） ▸", 14, LINK, false);
-        root.addView(lookToggle, wide(12));
-        lookPanel = (LinearLayout) buildLookPanel();
-        root.addView(lookPanel, wide(6));
-        lookToggle.setOnClickListener(v -> {
-            if (lookPanel.getVisibility() == View.VISIBLE) {
-                lookPanel.setVisibility(View.GONE);
-                lookToggle.setText("外觀（主題顏色、底圖） ▸");
-            } else {
-                openLook();
-            }
-        });
-
-        TextView advToggle = text("進階設定 ▸", 14, LINK, false);
-        root.addView(advToggle, wide(12));
-        LinearLayout adv = new LinearLayout(this);
-        adv.setOrientation(LinearLayout.VERTICAL);
-        adv.setVisibility(View.GONE);
-        adv.addView(text("伺服器網址", 14, MUTED, false));
-        serverInput = input("https://…", prefs.getString("server", DEFAULT_SERVER), false);
-        adv.addView(serverInput, wide(4));
-        systemCheck = new CheckBox(this);
-        systemCheck.setText("也檢查手機內建的系統 APP（數量多，會久很多）");
-        systemCheck.setTextColor(TEXT);
-        systemCheck.setButtonTintList(ColorStateList.valueOf(LINK));
-        adv.addView(systemCheck, wide(8));
-        TextView logout = text("更換親友密碼", 14, LINK, false);
-        logout.setOnClickListener(v -> {
-            if (worker != null && worker.isAlive()) {
-                toastDialog("請先停止掃描，再更換密碼。");
-                return;
-            }
-            prefs.edit().remove("password").remove("saved_password").apply();
-            showPage(false);
-        });
-        adv.addView(logout, wide(12));
-        root.addView(adv, wide(4));
-        advToggle.setOnClickListener(v -> {
-            boolean show = adv.getVisibility() != View.VISIBLE;
-            adv.setVisibility(show ? View.VISIBLE : View.GONE);
-            advToggle.setText(show ? "進階設定 ▾" : "進階設定 ▸");
-        });
 
         LinearLayout actions = new LinearLayout(this);
         actions.setOrientation(LinearLayout.HORIZONTAL);
@@ -482,11 +492,7 @@ public class MainActivity extends Activity {
         resultList.setOrientation(LinearLayout.VERTICAL);
         root.addView(resultList, wide(12));
 
-        Button exitButton = button("離開 APP", false);
-        exitButton.setOnClickListener(v -> confirmExit());
-        root.addView(exitButton, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(48)) {{
-            topMargin = dp(24);
-        }});
+        exitButton(root);
 
         TextView foot = text("這是「第二意見」工具，日常防護請保留 Google Play 安全防護。", 12, MUTED, false);
         root.addView(foot, wide(16));
@@ -496,6 +502,49 @@ public class MainActivity extends Activity {
             cancelled = true;
             statusText.setText("正在停止…");
         });
+        return scroll;
+    }
+
+    private View buildLookTab() {
+        LinearLayout root = new LinearLayout(this);
+        ScrollView scroll = page(root);
+        root.addView(text("外觀", 24, TEXT, true));
+        root.addView(text("挑一個喜歡的主題顏色，也可以放自己的照片當底圖。", 14, MUTED, false));
+        View look = buildLookPanel();
+        look.setVisibility(View.VISIBLE);
+        root.addView(look, wide(16));
+        return scroll;
+    }
+
+    private View buildSettingsTab() {
+        LinearLayout root = new LinearLayout(this);
+        ScrollView scroll = page(root);
+        root.addView(text("設定", 24, TEXT, true));
+
+        root.addView(text("掃描範圍", 14, MUTED, false), wide(16));
+        systemCheck = new CheckBox(this);
+        systemCheck.setText("也檢查手機內建的系統 APP（數量多，會久很多）");
+        systemCheck.setTextColor(TEXT);
+        systemCheck.setButtonTintList(ColorStateList.valueOf(LINK));
+        root.addView(systemCheck, wide(4));
+
+        root.addView(text("伺服器網址（一般不用改）", 14, MUTED, false), wide(16));
+        serverInput = input("https://…", prefs.getString("server", DEFAULT_SERVER), false);
+        root.addView(serverInput, wide(4));
+
+        Button logout = button("更換親友密碼", false);
+        logout.setOnClickListener(v -> {
+            if (scanning()) {
+                toastDialog("請先停止掃描，再更換密碼。");
+                return;
+            }
+            prefs.edit().remove("password").remove("saved_password").apply();
+            showPage(false);
+        });
+        root.addView(logout, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(48)) {{
+            topMargin = dp(24);
+        }});
+        exitButton(root);
         return scroll;
     }
 
