@@ -4,6 +4,13 @@ import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.res.ColorStateList;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.graphics.Matrix;
+import android.os.Build;
+import android.widget.FrameLayout;
+import android.widget.ImageView;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
@@ -32,7 +39,9 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.ByteArrayOutputStream;
+import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
@@ -54,16 +63,22 @@ public class MainActivity extends Activity {
     private static final long QUERY_INTERVAL_MS = 16_000;   // VirusTotal 免費版每分鐘 4 次
     private static final long CACHE_MS = 7L * 24 * 60 * 60 * 1000;
 
-    private static final int BRAND = Color.parseColor("#1E5BB8");
-    private static final int TEXT = Color.parseColor("#1A2333");
-    private static final int MUTED = Color.parseColor("#56637A");
-    private static final int LINE = Color.parseColor("#D5DEEC");
-    private static final int DANGER = Color.parseColor("#B3261E");
-    private static final int DANGER_BG = Color.parseColor("#FBE7E5");
-    private static final int WARN = Color.parseColor("#9A6200");
-    private static final int WARN_BG = Color.parseColor("#FDF3DC");
-    private static final int CLEAN = Color.parseColor("#1F7A45");
-    private static final int UNKNOWN = Color.parseColor("#3D5A80");
+    private static final int PICK_BG = 41;
+
+    // 五種主題：代號、名稱、主色、主色上的字色、背景、卡片、文字、次要文字、框線、是否深色
+    private static final String[][] THEMES = {
+            {"blue",   "藍色",   "#1E5BB8", "#FFFFFF", "#F4F7FC", "#FFFFFF", "#1A2333", "#56637A", "#D5DEEC", "0"},
+            {"pink",   "粉色",   "#C93F73", "#FFFFFF", "#FDF3F7", "#FFFFFF", "#2E1A22", "#6E5662", "#F0D2DE", "0"},
+            {"purple", "粉紫色", "#8A55C4", "#FFFFFF", "#F7F2FC", "#FFFFFF", "#241A33", "#62567A", "#E0D4F0", "0"},
+            {"yellow", "黃色",   "#F2B705", "#2B2100", "#FFFAEA", "#FFFFFF", "#2B2410", "#6B6040", "#EFE2B8", "0"},
+            {"black",  "黑色",   "#E8EAED", "#121417", "#121417", "#1E2228", "#ECEFF4", "#A7B0BE", "#343A44", "1"},
+    };
+
+    // 目前主題的顏色（onCreate 依設定填入）
+    private int BRAND, ON_BRAND, LINK, BG, SURFACE, TEXT, MUTED, LINE;
+    private int DANGER, DANGER_BG, WARN, WARN_BG, CLEAN, UNKNOWN;
+    private boolean dark;
+    private String themeKey;
 
     private final Handler ui = new Handler(Looper.getMainLooper());
     private SharedPreferences prefs;
@@ -93,17 +108,242 @@ public class MainActivity extends Activity {
         super.onCreate(savedInstanceState);
         prefs = getSharedPreferences("settings", MODE_PRIVATE);
         cache = getSharedPreferences("scan_cache", MODE_PRIVATE);
-        android.widget.FrameLayout frame = new android.widget.FrameLayout(this);
+        loadTheme();
+        FrameLayout frame = new FrameLayout(this);
         // Android 15 以上畫面會延伸到狀態列和導覽列底下，這行讓內容自動避開它們
         frame.setFitsSystemWindows(true);
-        frame.setBackgroundColor(Color.parseColor("#F4F7FC"));
+        frame.setBackgroundColor(BG);
+        bgImage = new ImageView(this);
+        bgImage.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        frame.addView(bgImage, new FrameLayout.LayoutParams(-1, -1));
+        bgScrim = new View(this);
+        frame.addView(bgScrim, new FrameLayout.LayoutParams(-1, -1));
         loginPage = buildLoginPage();
         scanPage = buildLayout();
         frame.addView(loginPage);
         frame.addView(scanPage);
         setContentView(frame);
-        // 每次打開都先顯示登入頁；有記住密碼時會自動填好，按「進入」即可
-        showPage(false);
+        applySystemBars();
+        applyBackgroundImage();
+        // 每次打開都先顯示登入頁；有記住密碼時會自動填好，按「進入」即可。
+        // 只有換主題時（畫面重建）才直接回到掃描頁。
+        boolean unlocked = savedInstanceState != null && savedInstanceState.getBoolean("unlocked", false);
+        showPage(unlocked);
+        if (unlocked && savedInstanceState.getBoolean("look_open", false)) openLook();
+    }
+
+    @Override
+    protected void onSaveInstanceState(Bundle out) {
+        super.onSaveInstanceState(out);
+        out.putBoolean("unlocked", scanPage != null && scanPage.getVisibility() == View.VISIBLE);
+        out.putBoolean("look_open", lookPanel != null && lookPanel.getVisibility() == View.VISIBLE);
+    }
+
+    // ------------------------------------------------------------------ 主題與底圖
+
+    private ImageView bgImage;
+    private View bgScrim;
+    private LinearLayout lookPanel;
+    private TextView lookToggle;
+    private Button removeBgButton;
+
+    private static int c(String hex) {
+        return Color.parseColor(hex);
+    }
+
+    private void loadTheme() {
+        themeKey = prefs.getString("theme", "blue");
+        String[] t = THEMES[0];
+        for (String[] x : THEMES) if (x[0].equals(themeKey)) t = x;
+        themeKey = t[0];
+        BRAND = c(t[2]); ON_BRAND = c(t[3]); BG = c(t[4]); SURFACE = c(t[5]);
+        TEXT = c(t[6]); MUTED = c(t[7]); LINE = c(t[8]); dark = "1".equals(t[9]);
+        // 黃色太淺，當文字連結看不清楚，改用較深的金色
+        LINK = "yellow".equals(themeKey) ? c("#8A6400") : BRAND;
+        if (dark) {
+            DANGER = c("#FF8A80"); DANGER_BG = c("#3A1F1E");
+            WARN = c("#F2C14E"); WARN_BG = c("#3A2E14");
+            CLEAN = c("#6FCF97"); UNKNOWN = c("#9DB4D6");
+        } else {
+            DANGER = c("#B3261E"); DANGER_BG = c("#FBE7E5");
+            WARN = c("#9A6200"); WARN_BG = c("#FDF3DC");
+            CLEAN = c("#1F7A45"); UNKNOWN = c("#3D5A80");
+        }
+    }
+
+    @SuppressWarnings("deprecation")
+    private void applySystemBars() {
+        getWindow().setStatusBarColor(BG);
+        getWindow().setNavigationBarColor(BG);
+        View decor = getWindow().getDecorView();
+        if (Build.VERSION.SDK_INT >= 30) {
+            int mask = android.view.WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS
+                    | android.view.WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS;
+            android.view.WindowInsetsController ctl = getWindow().getInsetsController();
+            if (ctl != null) ctl.setSystemBarsAppearance(dark ? 0 : mask, mask);
+        } else if (Build.VERSION.SDK_INT >= 23) {
+            int flags = 0;
+            if (!dark) {
+                flags |= View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
+                if (Build.VERSION.SDK_INT >= 27) flags |= View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
+            }
+            decor.setSystemUiVisibility(flags);
+        }
+    }
+
+    private File bgFile() {
+        return new File(getFilesDir(), "background.jpg");
+    }
+
+    private void applyBackgroundImage() {
+        File f = bgFile();
+        Bitmap bmp = f.exists() ? BitmapFactory.decodeFile(f.getAbsolutePath()) : null;
+        if (bmp != null) {
+            bgImage.setImageBitmap(bmp);
+            bgImage.setVisibility(View.VISIBLE);
+            // 底圖上蓋一層半透明的主題底色，文字才看得清楚
+            bgScrim.setBackgroundColor((0xA6 << 24) | (BG & 0x00FFFFFF));
+            bgScrim.setVisibility(View.VISIBLE);
+        } else {
+            bgImage.setImageDrawable(null);
+            bgImage.setVisibility(View.GONE);
+            bgScrim.setVisibility(View.GONE);
+        }
+        if (removeBgButton != null) removeBgButton.setVisibility(bmp != null ? View.VISIBLE : View.GONE);
+    }
+
+    private boolean scanning() {
+        return worker != null && worker.isAlive();
+    }
+
+    private void chooseTheme(String key) {
+        if (key.equals(themeKey)) return;
+        if (scanning()) {
+            toastDialog("掃描進行中，請先停止或等掃描完成再換主題。");
+            return;
+        }
+        prefs.edit().putString("theme", key).apply();
+        recreate();
+    }
+
+    private void pickBackground() {
+        Intent i = new Intent(Intent.ACTION_GET_CONTENT);
+        i.setType("image/*");
+        i.addCategory(Intent.CATEGORY_OPENABLE);
+        try {
+            startActivityForResult(Intent.createChooser(i, "選擇底圖"), PICK_BG);
+        } catch (Exception e) {
+            toastDialog("這支手機找不到可以選照片的 APP。");
+        }
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode != PICK_BG || resultCode != RESULT_OK || data == null || data.getData() == null) return;
+        Uri uri = data.getData();
+        new Thread(() -> {
+            boolean ok = saveBackground(uri);
+            ui.post(() -> {
+                if (isFinishing()) return;
+                if (ok) applyBackgroundImage();
+                else toastDialog("這張圖片讀取失敗，請換一張試試。");
+            });
+        }).start();
+    }
+
+    /** 把選的照片縮小（最長邊約 1600 像素）並轉正後，存一份在 APP 裡，原圖不會被改動。 */
+    private boolean saveBackground(Uri uri) {
+        try {
+            BitmapFactory.Options o = new BitmapFactory.Options();
+            o.inJustDecodeBounds = true;
+            try (InputStream in = getContentResolver().openInputStream(uri)) {
+                BitmapFactory.decodeStream(in, null, o);
+            }
+            if (o.outWidth <= 0 || o.outHeight <= 0) return false;
+            int sample = 1;
+            while (Math.max(o.outWidth, o.outHeight) / (sample * 2) >= 1600) sample *= 2;
+            BitmapFactory.Options o2 = new BitmapFactory.Options();
+            o2.inSampleSize = sample;
+            Bitmap bmp;
+            try (InputStream in = getContentResolver().openInputStream(uri)) {
+                bmp = BitmapFactory.decodeStream(in, null, o2);
+            }
+            if (bmp == null) return false;
+            int rotate = 0;
+            if (Build.VERSION.SDK_INT >= 24) {
+                try (InputStream in = getContentResolver().openInputStream(uri)) {
+                    android.media.ExifInterface exif = new android.media.ExifInterface(in);
+                    int ori = exif.getAttributeInt(android.media.ExifInterface.TAG_ORIENTATION, 1);
+                    rotate = ori == 6 ? 90 : ori == 3 ? 180 : ori == 8 ? 270 : 0;
+                } catch (Exception ignored) {
+                }
+            }
+            if (rotate != 0) {
+                Matrix m = new Matrix();
+                m.postRotate(rotate);
+                bmp = Bitmap.createBitmap(bmp, 0, 0, bmp.getWidth(), bmp.getHeight(), m, true);
+            }
+            try (FileOutputStream out = new FileOutputStream(bgFile())) {
+                bmp.compress(Bitmap.CompressFormat.JPEG, 85, out);
+            }
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private void openLook() {
+        lookPanel.setVisibility(View.VISIBLE);
+        lookToggle.setText("外觀（主題顏色、底圖） ▾");
+    }
+
+    private View buildLookPanel() {
+        LinearLayout p = new LinearLayout(this);
+        p.setOrientation(LinearLayout.VERTICAL);
+        p.setVisibility(View.GONE);
+        p.addView(text("主題顏色", 14, MUTED, false));
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        for (String[] t : THEMES) {
+            LinearLayout cell = new LinearLayout(this);
+            cell.setOrientation(LinearLayout.VERTICAL);
+            cell.setGravity(Gravity.CENTER_HORIZONTAL);
+            View dot = new View(this);
+            GradientDrawable g = new GradientDrawable();
+            g.setShape(GradientDrawable.OVAL);
+            g.setColor(c("black".equals(t[0]) ? "#1E2228" : t[2]));
+            boolean selected = t[0].equals(themeKey);
+            g.setStroke(dp(selected ? 4 : 1), selected ? TEXT : LINE);
+            dot.setBackground(g);
+            cell.addView(dot, new LinearLayout.LayoutParams(dp(40), dp(40)));
+            TextView name = text(t[1] + (selected ? " ✓" : ""), 12, selected ? TEXT : MUTED, selected);
+            name.setGravity(Gravity.CENTER_HORIZONTAL);
+            cell.addView(name, wide(4));
+            String key = t[0];
+            cell.setOnClickListener(v -> chooseTheme(key));
+            row.addView(cell, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+        }
+        p.addView(row, wide(8));
+        p.addView(text("底圖", 14, MUTED, false), wide(16));
+        LinearLayout bgRow = new LinearLayout(this);
+        bgRow.setOrientation(LinearLayout.HORIZONTAL);
+        Button pick = button("從相簿選圖", false);
+        pick.setOnClickListener(v -> pickBackground());
+        bgRow.addView(pick, new LinearLayout.LayoutParams(0, dp(46), 1));
+        removeBgButton = button("移除底圖", false);
+        removeBgButton.setOnClickListener(v -> {
+            //noinspection ResultOfMethodCallIgnored
+            bgFile().delete();
+            applyBackgroundImage();
+        });
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(46), 1);
+        lp.leftMargin = dp(8);
+        bgRow.addView(removeBgButton, lp);
+        removeBgButton.setVisibility(bgFile().exists() ? View.VISIBLE : View.GONE);
+        p.addView(bgRow, wide(6));
+        p.addView(text("照片只存在這支手機的 APP 裡，不會上傳。", 12, MUTED, false), wide(6));
+        return p;
     }
 
     private int dp(int v) {
@@ -140,8 +380,8 @@ public class MainActivity extends Activity {
         b.setText(label);
         b.setAllCaps(false);
         b.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
-        b.setTextColor(primary ? Color.WHITE : TEXT);
-        GradientDrawable g = box(primary ? BRAND : Color.WHITE, primary ? BRAND : LINE);
+        b.setTextColor(primary ? ON_BRAND : TEXT);
+        GradientDrawable g = box(primary ? BRAND : SURFACE, primary ? BRAND : LINE);
         g.setCornerRadius(dp(10));
         b.setBackground(g);
         return b;
@@ -154,9 +394,11 @@ public class MainActivity extends Activity {
         e.setSingleLine(true);
         e.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
         e.setPadding(dp(12), dp(10), dp(12), dp(10));
-        GradientDrawable g = box(Color.WHITE, LINE);
+        GradientDrawable g = box(SURFACE, LINE);
         g.setCornerRadius(dp(10));
         e.setBackground(g);
+        e.setTextColor(TEXT);
+        e.setHintTextColor(MUTED);
         e.setInputType(password
                 ? InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD
                 : InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
@@ -165,7 +407,6 @@ public class MainActivity extends Activity {
 
     private View buildLayout() {
         ScrollView scroll = new ScrollView(this);
-        scroll.setBackgroundColor(Color.parseColor("#F4F7FC"));
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(dp(16), dp(20), dp(16), dp(32));
@@ -174,7 +415,20 @@ public class MainActivity extends Activity {
         root.addView(text("掃毒小幫手", 24, TEXT, true));
         root.addView(text("檢查手機上安裝的每一個 APP，用 70 多家防毒引擎做第二意見。", 14, MUTED, false));
 
-        TextView advToggle = text("進階設定 ▸", 14, BRAND, false);
+        lookToggle = text("外觀（主題顏色、底圖） ▸", 14, LINK, false);
+        root.addView(lookToggle, wide(12));
+        lookPanel = (LinearLayout) buildLookPanel();
+        root.addView(lookPanel, wide(6));
+        lookToggle.setOnClickListener(v -> {
+            if (lookPanel.getVisibility() == View.VISIBLE) {
+                lookPanel.setVisibility(View.GONE);
+                lookToggle.setText("外觀（主題顏色、底圖） ▸");
+            } else {
+                openLook();
+            }
+        });
+
+        TextView advToggle = text("進階設定 ▸", 14, LINK, false);
         root.addView(advToggle, wide(12));
         LinearLayout adv = new LinearLayout(this);
         adv.setOrientation(LinearLayout.VERTICAL);
@@ -185,8 +439,9 @@ public class MainActivity extends Activity {
         systemCheck = new CheckBox(this);
         systemCheck.setText("也檢查手機內建的系統 APP（數量多，會久很多）");
         systemCheck.setTextColor(TEXT);
+        systemCheck.setButtonTintList(ColorStateList.valueOf(LINK));
         adv.addView(systemCheck, wide(8));
-        TextView logout = text("更換親友密碼", 14, BRAND, false);
+        TextView logout = text("更換親友密碼", 14, LINK, false);
         logout.setOnClickListener(v -> {
             if (worker != null && worker.isAlive()) {
                 toastDialog("請先停止掃描，再更換密碼。");
@@ -217,6 +472,7 @@ public class MainActivity extends Activity {
 
         progressBar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
         progressBar.setVisibility(View.GONE);
+        progressBar.setProgressTintList(ColorStateList.valueOf(LINK));
         root.addView(progressBar, wide(12));
 
         statusText = text("按「開始掃描」後，會逐一檢查你自己安裝的 APP。\n免費版每分鐘只能查 4 個，第一次掃描可能要十幾分鐘；查過的 APP 7 天內不會重查。", 14, MUTED, false);
@@ -247,7 +503,6 @@ public class MainActivity extends Activity {
 
     private View buildLoginPage() {
         ScrollView scroll = new ScrollView(this);
-        scroll.setBackgroundColor(Color.parseColor("#F4F7FC"));
         scroll.setFillViewport(true);
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
@@ -271,6 +526,7 @@ public class MainActivity extends Activity {
         rememberCheck = new CheckBox(this);
         rememberCheck.setText("記住密碼（下次自動填入）");
         rememberCheck.setTextColor(TEXT);
+        rememberCheck.setButtonTintList(ColorStateList.valueOf(LINK));
         rememberCheck.setChecked(prefs.getBoolean("remember", true));
         root.addView(rememberCheck, wide(8));
         loginError = text("", 14, DANGER, false);
@@ -627,7 +883,7 @@ public class MainActivity extends Activity {
             for (AppItem a : bad) resultList.addView(card(a, true), wide(8));
         }
         if (!unknownList.isEmpty()) {
-            TextView t = text("VirusTotal 沒看過的 APP（" + unknownList.size() + " 個）▸", 15, BRAND, false);
+            TextView t = text("VirusTotal 沒看過的 APP（" + unknownList.size() + " 個）▸", 15, LINK, false);
             LinearLayout box = new LinearLayout(this);
             box.setOrientation(LinearLayout.VERTICAL);
             box.setVisibility(View.GONE);
@@ -643,7 +899,7 @@ public class MainActivity extends Activity {
         LinearLayout c = new LinearLayout(this);
         c.setOrientation(LinearLayout.VERTICAL);
         c.setPadding(dp(14), dp(12), dp(14), dp(12));
-        int fill = "danger".equals(a.verdict) ? DANGER_BG : "warning".equals(a.verdict) ? WARN_BG : Color.WHITE;
+        int fill = "danger".equals(a.verdict) ? DANGER_BG : "warning".equals(a.verdict) ? WARN_BG : SURFACE;
         int stroke = "danger".equals(a.verdict) ? DANGER : "warning".equals(a.verdict) ? WARN : LINE;
         c.setBackground(box(fill, stroke));
 
