@@ -54,10 +54,10 @@ public class MainActivity extends Activity {
     private static final long QUERY_INTERVAL_MS = 16_000;   // VirusTotal 免費版每分鐘 4 次
     private static final long CACHE_MS = 7L * 24 * 60 * 60 * 1000;
 
-    private static final int GREEN = Color.parseColor("#1F6F5C");
-    private static final int TEXT = Color.parseColor("#1C2421");
-    private static final int MUTED = Color.parseColor("#5B6863");
-    private static final int LINE = Color.parseColor("#D7DFDB");
+    private static final int BRAND = Color.parseColor("#1E5BB8");
+    private static final int TEXT = Color.parseColor("#1A2333");
+    private static final int MUTED = Color.parseColor("#56637A");
+    private static final int LINE = Color.parseColor("#D5DEEC");
     private static final int DANGER = Color.parseColor("#B3261E");
     private static final int DANGER_BG = Color.parseColor("#FBE7E5");
     private static final int WARN = Color.parseColor("#9A6200");
@@ -138,7 +138,7 @@ public class MainActivity extends Activity {
         b.setAllCaps(false);
         b.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
         b.setTextColor(primary ? Color.WHITE : TEXT);
-        GradientDrawable g = box(primary ? GREEN : Color.WHITE, primary ? GREEN : LINE);
+        GradientDrawable g = box(primary ? BRAND : Color.WHITE, primary ? BRAND : LINE);
         g.setCornerRadius(dp(10));
         b.setBackground(g);
         return b;
@@ -162,7 +162,7 @@ public class MainActivity extends Activity {
 
     private View buildLayout() {
         ScrollView scroll = new ScrollView(this);
-        scroll.setBackgroundColor(Color.parseColor("#F5F7F6"));
+        scroll.setBackgroundColor(Color.parseColor("#F4F7FC"));
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(dp(16), dp(20), dp(16), dp(32));
@@ -171,7 +171,7 @@ public class MainActivity extends Activity {
         root.addView(text("掃毒小幫手", 24, TEXT, true));
         root.addView(text("檢查手機上安裝的每一個 APP，用 70 多家防毒引擎做第二意見。", 14, MUTED, false));
 
-        TextView advToggle = text("進階設定 ▸", 14, GREEN, false);
+        TextView advToggle = text("進階設定 ▸", 14, BRAND, false);
         root.addView(advToggle, wide(12));
         LinearLayout adv = new LinearLayout(this);
         adv.setOrientation(LinearLayout.VERTICAL);
@@ -183,7 +183,7 @@ public class MainActivity extends Activity {
         systemCheck.setText("也檢查手機內建的系統 APP（數量多，會久很多）");
         systemCheck.setTextColor(TEXT);
         adv.addView(systemCheck, wide(8));
-        TextView logout = text("更換親友密碼", 14, GREEN, false);
+        TextView logout = text("更換親友密碼", 14, BRAND, false);
         logout.setOnClickListener(v -> {
             if (worker != null && worker.isAlive()) {
                 toastDialog("請先停止掃描，再更換密碼。");
@@ -244,7 +244,7 @@ public class MainActivity extends Activity {
 
     private View buildLoginPage() {
         ScrollView scroll = new ScrollView(this);
-        scroll.setBackgroundColor(Color.parseColor("#F5F7F6"));
+        scroll.setBackgroundColor(Color.parseColor("#F4F7FC"));
         scroll.setFillViewport(true);
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
@@ -624,7 +624,7 @@ public class MainActivity extends Activity {
             for (AppItem a : bad) resultList.addView(card(a, true), wide(8));
         }
         if (!unknownList.isEmpty()) {
-            TextView t = text("VirusTotal 沒看過的 APP（" + unknownList.size() + " 個）▸", 15, GREEN, false);
+            TextView t = text("VirusTotal 沒看過的 APP（" + unknownList.size() + " 個）▸", 15, BRAND, false);
             LinearLayout box = new LinearLayout(this);
             box.setOrientation(LinearLayout.VERTICAL);
             box.setVisibility(View.GONE);
