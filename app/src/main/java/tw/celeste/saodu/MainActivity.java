@@ -412,10 +412,10 @@ public class MainActivity extends Activity {
     }
 
     // 功能選單（左上角 ☰）：每次只顯示一個功能的畫面
-    private static final String[] MENU_NAMES = {"🛡️  掃毒", "🎨  外觀設定", "🔑  我的金鑰"};
-    private static final String[] PAGE_TITLES = {"掃毒", "外觀設定", "我的金鑰"};
-    private final View[] tabPages = new View[3];
-    private final TextView[] menuItems = new TextView[3];
+    private static final String[] MENU_NAMES = {"🛡️  掃毒", "🎨  外觀設定"};
+    private static final String[] PAGE_TITLES = {"掃毒", "外觀設定"};
+    private final View[] tabPages = new View[2];
+    private final TextView[] menuItems = new TextView[2];
     private int currentTab = 0;
     private TextView pageTitle;
     private View drawerDim;
@@ -520,7 +520,6 @@ public class MainActivity extends Activity {
         shell.addView(content, new LinearLayout.LayoutParams(-1, 0, 1));
         tabPages[0] = buildScanTab();
         tabPages[1] = buildLookTab();
-        tabPages[2] = buildKeyTab();
         for (View v : tabPages) content.addView(v, new FrameLayout.LayoutParams(-1, -1));
 
         // 半透明遮罩＋左側選單
@@ -629,16 +628,20 @@ public class MainActivity extends Activity {
         return scroll;
     }
 
-    // ------------------------------------------------------------------ 我的金鑰
+    // ------------------------------------------------------------------ 登入方式：親友密碼／自己的金鑰
 
     private static final Pattern KEY_PATTERN = Pattern.compile("\\b[0-9a-fA-F]{64}\\b");
-    private TextView keyStatus;
-    private EditText keyInput;
-    private Button keyClear;
     private boolean waitingForKey = false;   // 按了①或②，回到 APP 時要自動偵測剪貼簿
+    private boolean keyMode = false;         // 登入頁目前選的方式
+    private Button modePwButton, modeKeyButton;
+    private LinearLayout pwBox, keyBox;
+    private EditText keyInput;
+    private CheckBox rememberKeyCheck;
+    private TextView loginSub;
 
+    /** 正在使用的自己的金鑰（用親友密碼登入時是空的） */
     private String myKey() {
-        return prefs.getString("vt_key", "");
+        return "key".equals(prefs.getString("mode", "password")) ? prefs.getString("active_key", "") : "";
     }
 
     private static String findKey(CharSequence text) {
@@ -659,23 +662,6 @@ public class MainActivity extends Activity {
         }
     }
 
-    private void saveKey(String key) {
-        prefs.edit().putString("vt_key", key).apply();
-        waitingForKey = false;
-        refreshKeyStatus();
-        keyStatus.setText("✅ 已儲存！之後的掃描都會使用你自己的金鑰，不會占用大家共用的額度。");
-        keyStatus.setTextColor(CLEAN);
-    }
-
-    private void refreshKeyStatus() {
-        boolean has = !myKey().isEmpty();
-        String k = myKey();
-        keyStatus.setText(has ? "✅ 目前使用你自己的金鑰（…" + k.substring(k.length() - 4) + "）。"
-                : "目前使用大家共用的額度。");
-        keyStatus.setTextColor(has ? CLEAN : MUTED);
-        keyClear.setVisibility(has ? View.VISIBLE : View.GONE);
-    }
-
     private void openWeb(String url) {
         waitingForKey = true;
         try {
@@ -689,22 +675,21 @@ public class MainActivity extends Activity {
     public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
         // Android 10 以上只有在 APP 畫面在前景時才能讀剪貼簿，所以在這裡偵測
-        if (!hasFocus || !waitingForKey || scanPage == null || scanPage.getVisibility() != View.VISIBLE) return;
+        if (!hasFocus || !waitingForKey || loginPage == null || loginPage.getVisibility() != View.VISIBLE) return;
         String k = clipboardKey();
-        if (k == null || k.equals(myKey())) return;
+        if (k == null) return;
         waitingForKey = false;
-        showTab(2);
-        new AlertDialog.Builder(this)
-                .setTitle("偵測到 VirusTotal 金鑰")
-                .setMessage("剛剛複製的金鑰（…" + k.substring(60) + "）要用在掃毒小幫手嗎？")
-                .setPositiveButton("使用這組金鑰", (d, w) -> saveKey(k))
-                .setNegativeButton("先不要", null)
-                .show();
+        setLoginMode(true);
+        keyInput.setText(k);
+        loginError.setText("✅ 已自動貼上剛複製的金鑰，按「進入」即可。");
+        loginError.setTextColor(CLEAN);
+        loginError.setVisibility(View.VISIBLE);
     }
 
     private Button stepButton(String label, View.OnClickListener l) {
         Button b = button(label, false);
         b.setTextColor(LINK);
+        b.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
         GradientDrawable g = box(SURFACE, LINK);
         g.setCornerRadius(dp(10));
         b.setBackground(g);
@@ -712,71 +697,22 @@ public class MainActivity extends Activity {
         return b;
     }
 
-    private View buildKeyTab() {
-        LinearLayout root = new LinearLayout(this);
-        ScrollView scroll = page(root);
-        root.addView(text("用自己的 VirusTotal 金鑰（選填，免費）", 17, TEXT, true));
-        root.addView(text("填了之後，掃描會用你自己的免費額度（每天 500 次），不會占用大家共用的額度。金鑰只存在這支手機裡。不填也照常可以使用。", 14, MUTED, false), wide(6));
+    private void styleMode(Button b, boolean on) {
+        GradientDrawable g = box(on ? BRAND : SURFACE, on ? BRAND : LINE);
+        g.setCornerRadius(dp(10));
+        b.setBackground(g);
+        b.setTextColor(on ? ON_BRAND : TEXT);
+        b.setTypeface(on ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT);
+    }
 
-        root.addView(text("① 註冊帳號（已經有帳號可跳過）", 15, TEXT, true), wide(20));
-        root.addView(text("可以用 Google 帳號一鍵註冊，註冊後到信箱點驗證信。", 13, MUTED, false), wide(2));
-        root.addView(stepButton("前往註冊", v -> openWeb("https://www.virustotal.com/gui/join-us")),
-                new LinearLayout.LayoutParams(-1, dp(46)) {{ topMargin = dp(8); }});
-
-        root.addView(text("② 複製金鑰", 15, TEXT, true), wide(20));
-        root.addView(text("登入後會看到「API Key」，按旁邊的複製圖示 📋，然後回到這個 APP。", 13, MUTED, false), wide(2));
-        root.addView(stepButton("打開我的金鑰", v -> openWeb("https://www.virustotal.com/gui/my-apikey")),
-                new LinearLayout.LayoutParams(-1, dp(46)) {{ topMargin = dp(8); }});
-
-        root.addView(text("③ 回到 APP 自動填入", 15, TEXT, true), wide(20));
-        root.addView(text("回來時會自動偵測剛複製的金鑰並詢問是否使用。沒有跳出來的話，按下面按鈕。", 13, MUTED, false), wide(2));
-        Button paste = button("一鍵貼上金鑰", true);
-        paste.setOnClickListener(v -> {
-            String k = clipboardKey();
-            if (k == null) {
-                keyStatus.setText("⚠️ 剪貼簿裡沒有找到金鑰。請到 VirusTotal 的「API Key」按複製圖示後再試一次（金鑰是 64 個英文和數字）。");
-                keyStatus.setTextColor(WARN);
-            } else {
-                saveKey(k);
-            }
-        });
-        root.addView(paste, new LinearLayout.LayoutParams(-1, dp(50)) {{ topMargin = dp(8); }});
-
-        root.addView(text("或手動貼上", 13, MUTED, false), wide(20));
-        LinearLayout row = new LinearLayout(this);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        keyInput = input("64 碼的金鑰", "", true);
-        row.addView(keyInput, new LinearLayout.LayoutParams(0, dp(48), 1));
-        Button save = button("儲存", false);
-        save.setOnClickListener(v -> {
-            String k = findKey(keyInput.getText());
-            if (k == null) {
-                keyStatus.setText("⚠️ 格式不對：金鑰是 64 個英文和數字，請整串複製貼上。");
-                keyStatus.setTextColor(WARN);
-            } else {
-                keyInput.setText("");
-                saveKey(k);
-            }
-        });
-        LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(48));
-        slp.leftMargin = dp(8);
-        row.addView(save, slp);
-        root.addView(row, wide(4));
-
-        keyStatus = text("", 14, MUTED, false);
-        root.addView(keyStatus, wide(16));
-        keyClear = button("清除我的金鑰（改回共用額度）", false);
-        keyClear.setOnClickListener(v -> new AlertDialog.Builder(this)
-                .setMessage("確定要清除你的金鑰嗎？之後會改用大家共用的額度。")
-                .setPositiveButton("清除", (d, w) -> {
-                    prefs.edit().remove("vt_key").apply();
-                    refreshKeyStatus();
-                })
-                .setNegativeButton("取消", null)
-                .show());
-        root.addView(keyClear, new LinearLayout.LayoutParams(-1, dp(46)) {{ topMargin = dp(8); }});
-        refreshKeyStatus();
-        return scroll;
+    private void setLoginMode(boolean key) {
+        keyMode = key;
+        styleMode(modePwButton, !key);
+        styleMode(modeKeyButton, key);
+        pwBox.setVisibility(key ? View.GONE : View.VISIBLE);
+        keyBox.setVisibility(key ? View.VISIBLE : View.GONE);
+        loginSub.setText(key ? "用自己的 VirusTotal 金鑰（免費，每天 500 次）" : "請輸入親友密碼");
+        loginError.setVisibility(View.GONE);
     }
 
     private View buildLookTab() {
@@ -807,18 +743,65 @@ public class MainActivity extends Activity {
         TextView title = text("掃毒小幫手", 26, TEXT, true);
         title.setGravity(Gravity.CENTER_HORIZONTAL);
         root.addView(title, wide(8));
-        TextView sub = text("請輸入親友密碼", 15, MUTED, false);
-        sub.setGravity(Gravity.CENTER_HORIZONTAL);
-        root.addView(sub, wide(4));
+        loginSub = text("請輸入親友密碼", 15, MUTED, false);
+        loginSub.setGravity(Gravity.CENTER_HORIZONTAL);
+        root.addView(loginSub, wide(4));
 
+        // 兩種登入方式
+        LinearLayout modes = new LinearLayout(this);
+        modes.setOrientation(LinearLayout.HORIZONTAL);
+        modePwButton = button("親友密碼", false);
+        modeKeyButton = button("我自己的金鑰", false);
+        modes.addView(modePwButton, new LinearLayout.LayoutParams(0, dp(46), 1));
+        LinearLayout.LayoutParams mlp = new LinearLayout.LayoutParams(0, dp(46), 1);
+        mlp.leftMargin = dp(8);
+        modes.addView(modeKeyButton, mlp);
+        root.addView(modes, wide(20));
+        modePwButton.setOnClickListener(v -> setLoginMode(false));
+        modeKeyButton.setOnClickListener(v -> setLoginMode(true));
+
+        // 方式一：親友密碼
+        pwBox = new LinearLayout(this);
+        pwBox.setOrientation(LinearLayout.VERTICAL);
         passwordInput = input("密碼請向 Celeste 索取", "", true);
-        root.addView(passwordInput, wide(24));
+        pwBox.addView(passwordInput, wide(0));
         rememberCheck = new CheckBox(this);
         rememberCheck.setText("記住密碼（下次自動填入）");
         rememberCheck.setTextColor(TEXT);
         rememberCheck.setButtonTintList(ColorStateList.valueOf(LINK));
-        rememberCheck.setChecked(prefs.getBoolean("remember", true));
-        root.addView(rememberCheck, wide(8));
+        pwBox.addView(rememberCheck, wide(8));
+        root.addView(pwBox, wide(16));
+
+        // 方式二：自己的 VirusTotal 金鑰
+        keyBox = new LinearLayout(this);
+        keyBox.setOrientation(LinearLayout.VERTICAL);
+        keyBox.addView(text("還沒有金鑰？照著三個按鈕做，約 2 分鐘：", 14, MUTED, false));
+        keyBox.addView(stepButton("① 前往註冊（可用 Google 帳號）", v -> openWeb("https://www.virustotal.com/gui/join-us")),
+                new LinearLayout.LayoutParams(-1, dp(46)) {{ topMargin = dp(8); }});
+        keyBox.addView(stepButton("② 打開我的金鑰，按「API Key」旁的複製 📋", v -> openWeb("https://www.virustotal.com/gui/my-apikey")),
+                new LinearLayout.LayoutParams(-1, dp(46)) {{ topMargin = dp(8); }});
+        keyBox.addView(stepButton("③ 回到這裡一鍵貼上", v -> {
+            String k = clipboardKey();
+            if (k == null) {
+                loginError.setText("剪貼簿裡沒有找到金鑰。請到 VirusTotal 的「API Key」按複製圖示後再試一次（金鑰是 64 個英文和數字）。");
+                loginError.setTextColor(DANGER);
+            } else {
+                keyInput.setText(k);
+                loginError.setText("✅ 已貼上金鑰，按「進入」即可。");
+                loginError.setTextColor(CLEAN);
+            }
+            loginError.setVisibility(View.VISIBLE);
+        }), new LinearLayout.LayoutParams(-1, dp(46)) {{ topMargin = dp(8); }});
+        keyBox.addView(text("回到 APP 時也會自動偵測剛複製的金鑰。", 12, MUTED, false), wide(6));
+        keyInput = input("64 碼的 VirusTotal 金鑰", "", true);
+        keyBox.addView(keyInput, wide(12));
+        rememberKeyCheck = new CheckBox(this);
+        rememberKeyCheck.setText("記住金鑰（下次自動填入）");
+        rememberKeyCheck.setTextColor(TEXT);
+        rememberKeyCheck.setButtonTintList(ColorStateList.valueOf(LINK));
+        keyBox.addView(rememberKeyCheck, wide(8));
+        root.addView(keyBox, wide(16));
+
         loginError = text("", 14, DANGER, false);
         loginError.setVisibility(View.GONE);
         root.addView(loginError, wide(8));
@@ -826,7 +809,7 @@ public class MainActivity extends Activity {
         root.addView(loginButton, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(52)) {{
             topMargin = dp(16);
         }});
-        loginButton.setOnClickListener(v -> checkPassword());
+        loginButton.setOnClickListener(v -> checkLogin());
         Button exitButton = button("離開 APP", false);
         exitButton.setOnClickListener(v -> confirmExit());
         root.addView(exitButton, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(48)) {{
@@ -844,7 +827,11 @@ public class MainActivity extends Activity {
         });
         root.addView(versionLabel(), wide(24));
         passwordInput.setOnEditorActionListener((v, actionId, event) -> {
-            checkPassword();
+            checkLogin();
+            return true;
+        });
+        keyInput.setOnEditorActionListener((v, actionId, event) -> {
+            checkLogin();
             return true;
         });
         return scroll;
@@ -854,18 +841,32 @@ public class MainActivity extends Activity {
         loginPage.setVisibility(scan ? View.GONE : View.VISIBLE);
         scanPage.setVisibility(scan ? View.VISIBLE : View.GONE);
         if (!scan) {
+            // 打開時預設上次用的方式，並填入記住的密碼或金鑰
             boolean remember = prefs.getBoolean("remember", true);
             rememberCheck.setChecked(remember);
             passwordInput.setText(remember ? prefs.getString("saved_password", prefs.getString("password", "")) : "");
+            boolean rememberKey = prefs.getBoolean("remember_key", true);
+            rememberKeyCheck.setChecked(rememberKey);
+            keyInput.setText(rememberKey ? prefs.getString("saved_key", prefs.getString("vt_key", "")) : "");
+            setLoginMode("key".equals(prefs.getString("mode", "password")));
             loginButton.setEnabled(true);
             loginButton.setText("進入");
         }
     }
 
-    private void checkPassword() {
-        String password = passwordInput.getText().toString();
-        if (password.isEmpty()) {
+    private void checkLogin() {
+        final boolean useKey = keyMode;
+        final String password = useKey ? "" : passwordInput.getText().toString();
+        final String key = useKey ? findKey(keyInput.getText()) : "";
+        loginError.setTextColor(DANGER);
+        if (!useKey && password.isEmpty()) {
             loginError.setText("請輸入密碼。");
+            loginError.setVisibility(View.VISIBLE);
+            return;
+        }
+        if (useKey && key == null) {
+            loginError.setText(keyInput.getText().length() == 0 ? "請先貼上你的金鑰（可以照上面三個按鈕做）。"
+                    : "金鑰格式不對：應該是 64 個英文和數字，請整串複製貼上。");
             loginError.setVisibility(View.VISIBLE);
             return;
         }
@@ -873,31 +874,43 @@ public class MainActivity extends Activity {
         final String server = typed.isEmpty() ? DEFAULT_SERVER : typed;
         prefs.edit().putString("server", server).apply();
         loginButton.setEnabled(false);
-        loginButton.setText("確認中…");
+        loginButton.setText(useKey ? "確認金鑰中…" : "確認中…");
         loginError.setVisibility(View.GONE);
         new Thread(() -> {
-            HttpResult r = request(server + "/api/login", "POST", password);
+            HttpResult r = request(server + "/api/login", "POST", password, key);
             ui.post(() -> {
                 if (r.status == 200) {
-                    boolean remember = rememberCheck.isChecked();
-                    SharedPreferences.Editor e = prefs.edit()
-                            .putString("password", password)          // 這次使用中的密碼
-                            .putBoolean("remember", remember);
-                    if (remember) e.putString("saved_password", password);
-                    else e.remove("saved_password");
+                    SharedPreferences.Editor e = prefs.edit().putString("mode", useKey ? "key" : "password");
+                    if (useKey) {
+                        boolean remember = rememberKeyCheck.isChecked();
+                        e.putString("active_key", key).putBoolean("remember_key", remember).remove("vt_key");
+                        if (remember) e.putString("saved_key", key);
+                        else e.remove("saved_key");
+                    } else {
+                        boolean remember = rememberCheck.isChecked();
+                        e.putString("password", password).putBoolean("remember", remember);
+                        if (remember) e.putString("saved_password", password);
+                        else e.remove("saved_password");
+                    }
                     e.apply();
                     android.view.inputmethod.InputMethodManager imm =
                             (android.view.inputmethod.InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
-                    if (imm != null) imm.hideSoftInputFromWindow(passwordInput.getWindowToken(), 0);
+                    if (imm != null) imm.hideSoftInputFromWindow(loginButton.getWindowToken(), 0);
                     showPage(true);
                     return;
                 }
                 loginButton.setEnabled(true);
                 loginButton.setText("進入");
-                loginError.setText(r.status == 401 ? "密碼不正確，請再試一次。"
+                String detail = null;
+                try { detail = new JSONObject(r.body).optString("detail", null); } catch (Exception ignored) { }
+                loginError.setText(useKey
+                        ? (r.status == 0 ? "連不上伺服器，請確認網路。"
+                            : detail != null ? detail : "金鑰無法使用（" + r.status + "），請確認後再試。")
+                        : r.status == 401 ? "密碼不正確，請再試一次。"
                         : r.status == 429 ? "密碼錯誤太多次，請 10 分鐘後再試。"
                         : r.status == 0 ? "連不上伺服器，請確認網路。"
                         : "伺服器回應錯誤（" + r.status + "）。");
+                loginError.setTextColor(DANGER);
                 loginError.setVisibility(View.VISIBLE);
             });
         }).start();
@@ -915,8 +928,9 @@ public class MainActivity extends Activity {
 
     private void startScan() {
         String server = serverInput.getText().toString().trim().replaceAll("/+$", "");
-        String password = prefs.getString("password", "");
-        if (password.isEmpty()) {
+        boolean useKey = "key".equals(prefs.getString("mode", "password"));
+        String password = useKey ? "" : prefs.getString("password", "");
+        if (useKey ? myKey().isEmpty() : password.isEmpty()) {
             showPage(false);
             return;
         }
@@ -991,7 +1005,7 @@ public class MainActivity extends Activity {
                     } else if (r.status == 400 && !myKey().isEmpty()) {
                         String detail = "你填的 VirusTotal 金鑰有問題";
                         try { detail = new JSONObject(r.body).optString("detail", detail); } catch (Exception ignored) { }
-                        throw new Exception(detail + "（可到 ☰ →「我的金鑰」修改）");
+                        throw new Exception(detail + "（請登出後重新輸入金鑰）");
                     } else if (r.status == 429) {
                         setStatus("查詢額度暫時用完，等一分鐘後繼續…（" + app.label + "）");
                         sleepQuietly(60_000);
@@ -1014,7 +1028,7 @@ public class MainActivity extends Activity {
         } catch (AuthException e) {
             finalMessage = "親友密碼已變更，請重新輸入。";
             ui.post(() -> {
-                prefs.edit().remove("password").remove("saved_password").apply();
+                prefs.edit().remove("password").remove("saved_password").putString("mode", "password").apply();
                 showPage(false);
                 loginError.setText("親友密碼已變更，請重新輸入。");
                 loginError.setVisibility(View.VISIBLE);
@@ -1082,10 +1096,10 @@ public class MainActivity extends Activity {
     }
 
     private HttpResult query(String server, String password, String sha) {
-        return request(server + "/api/file/" + sha, "GET", password);
+        return request(server + "/api/file/" + sha, "GET", password, myKey());
     }
 
-    private HttpResult request(String url, String method, String password) {
+    private HttpResult request(String url, String method, String password, String vtKey) {
         HttpResult r = new HttpResult();
         HttpURLConnection c = null;
         try {
@@ -1100,8 +1114,7 @@ public class MainActivity extends Activity {
             // 與網頁版相同：密碼先做 URL 編碼，中文密碼也能放進標頭
             c.setRequestProperty("X-App-Password", URLEncoder.encode(password, "UTF-8").replace("+", "%20"));
             c.setRequestProperty("Accept", "application/json");
-            String vtKey = myKey();
-            if (!vtKey.isEmpty()) c.setRequestProperty("X-VT-Key", vtKey);
+            if (vtKey != null && !vtKey.isEmpty()) c.setRequestProperty("X-VT-Key", vtKey);
             r.status = c.getResponseCode();
             InputStream in = r.status >= 400 ? c.getErrorStream() : c.getInputStream();
             if (in != null) {
